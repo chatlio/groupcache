@@ -27,9 +27,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chatlio/groupcache/v3/consistenthash"
+	pb "github.com/chatlio/groupcache/v3/groupcachepb"
 	"github.com/golang/protobuf/proto"
-	"github.com/mailgun/groupcache/v2/consistenthash"
-	pb "github.com/mailgun/groupcache/v2/groupcachepb"
 )
 
 const defaultBasePath = "/_groupcache/"
@@ -170,6 +170,11 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	groupName := parts[0]
 	key := parts[1]
 
+	bypassCache := false
+	if r.URL.RawQuery == "nc" {
+		bypassCache = true
+	}
+
 	// Fetch the value for this group/key.
 	group := GetGroup(groupName)
 	if group == nil {
@@ -194,7 +199,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var b []byte
 
 	value := AllocatingByteSliceSink(&b)
-	err := group.Get(ctx, key, value)
+	err := group.Get(ctx, key, value, bypassCache)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -229,13 +234,17 @@ var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
 
-func (h *httpGetter) makeRequest(ctx context.Context, method string, in *pb.GetRequest, out *http.Response) error {
+func (h *httpGetter) makeRequest(ctx context.Context, method string, in *pb.GetRequest, out *http.Response, bypassCache bool) error {
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.baseURL,
 		url.QueryEscape(in.GetGroup()),
 		url.QueryEscape(in.GetKey()),
 	)
+	if bypassCache {
+		u += "?nc"
+	}
+
 	req, err := http.NewRequest(method, u, nil)
 	if err != nil {
 		return err
@@ -257,9 +266,9 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *pb.GetR
 	return nil
 }
 
-func (h *httpGetter) Get(ctx context.Context, in *pb.GetRequest, out *pb.GetResponse) error {
+func (h *httpGetter) Get(ctx context.Context, in *pb.GetRequest, out *pb.GetResponse, bypassCache bool) error {
 	var res http.Response
-	if err := h.makeRequest(ctx, http.MethodGet, in, &res); err != nil {
+	if err := h.makeRequest(ctx, http.MethodGet, in, &res, bypassCache); err != nil {
 		return err
 	}
 	defer res.Body.Close()
@@ -282,7 +291,7 @@ func (h *httpGetter) Get(ctx context.Context, in *pb.GetRequest, out *pb.GetResp
 
 func (h *httpGetter) Remove(ctx context.Context, in *pb.GetRequest) error {
 	var res http.Response
-	if err := h.makeRequest(ctx, http.MethodDelete, in, &res); err != nil {
+	if err := h.makeRequest(ctx, http.MethodDelete, in, &res, false); err != nil {
 		return err
 	}
 	defer res.Body.Close()

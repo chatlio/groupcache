@@ -32,9 +32,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	pb "github.com/mailgun/groupcache/v2/groupcachepb"
-	"github.com/mailgun/groupcache/v2/lru"
-	"github.com/mailgun/groupcache/v2/singleflight"
+	pb "github.com/chatlio/groupcache/v3/groupcachepb"
+	"github.com/chatlio/groupcache/v3/lru"
+	"github.com/chatlio/groupcache/v3/singleflight"
 )
 
 // A Getter loads data for a key.
@@ -210,30 +210,42 @@ func (g *Group) initPeers() {
 	}
 }
 
-func (g *Group) Get(ctx context.Context, key string, dest Sink) error {
+func (g *Group) Get(ctx context.Context, key string, dest Sink, bypassCache bool) error {
 	g.peersOnce.Do(g.initPeers)
 	g.Stats.Gets.Add(1)
 	if dest == nil {
 		return errors.New("groupcache: nil dest Sink")
 	}
-	value, cacheHit := g.lookupCache(key)
 
-	if cacheHit {
-		g.Stats.CacheHits.Add(1)
-		return setSinkView(dest, value)
-	}
+	var value ByteView
+	var err error
 
-	// Optimization to avoid double unmarshalling or copying: keep
-	// track of whether the dest was already populated. One caller
-	// (if local) will set this; the losers will not. The common
-	// case will likely be one caller.
-	destPopulated := false
-	value, destPopulated, err := g.load(ctx, key, dest)
-	if err != nil {
-		return err
-	}
-	if destPopulated {
-		return nil
+	if bypassCache {
+		value, err = g.loadWithoutCache(ctx, key, dest)
+		if err != nil {
+			return err
+		}
+	} else {
+		var cacheHit bool
+		value, cacheHit = g.lookupCache(key)
+
+		if cacheHit {
+			g.Stats.CacheHits.Add(1)
+			return setSinkView(dest, value)
+		}
+
+		// Optimization to avoid double unmarshalling or copying: keep
+		// track of whether the dest was already populated. One caller
+		// (if local) will set this; the losers will not. The common
+		// case will likely be one caller.
+		destPopulated := false
+		value, destPopulated, err = g.load(ctx, key, dest)
+		if err != nil {
+			return err
+		}
+		if destPopulated {
+			return nil
+		}
 	}
 	return setSinkView(dest, value)
 }
@@ -320,7 +332,7 @@ func (g *Group) load(ctx context.Context, key string, dest Sink) (value ByteView
 		var value ByteView
 		var err error
 		if peer, ok := g.peers.PickPeer(key); ok {
-			value, err = g.getFromPeer(ctx, peer, key)
+			value, err = g.getFromPeer(ctx, peer, key, false)
 			if err == nil {
 				g.Stats.PeerLoads.Add(1)
 				return value, nil
@@ -352,6 +364,34 @@ func (g *Group) load(ctx context.Context, key string, dest Sink) (value ByteView
 	return
 }
 
+// loadWithoutCache loads key either by invoking the getter locally or
+// by invoking the getter on another machine, never consulting the
+// caches.
+func (g *Group) loadWithoutCache(ctx context.Context, key string, dest Sink) (value ByteView, err error) {
+	if peer, ok := g.peers.PickPeer(key); ok {
+		value, err = g.getFromPeer(ctx, peer, key, true)
+		if err == nil {
+			g.Stats.PeerLoads.Add(1)
+			return value, nil
+		}
+		g.Stats.PeerErrors.Add(1)
+
+		return
+	}
+
+	value, err = g.getLocally(ctx, key, dest)
+	if err != nil {
+		g.Stats.LocalLoadErrs.Add(1)
+
+		return
+	}
+	g.Stats.LocalLoads.Add(1)
+
+	g.populateCache(key, value, &g.mainCache)
+
+	return value, nil
+}
+
 func (g *Group) getLocally(ctx context.Context, key string, dest Sink) (ByteView, error) {
 	err := g.getter.Get(ctx, key, dest)
 	if err != nil {
@@ -360,13 +400,13 @@ func (g *Group) getLocally(ctx context.Context, key string, dest Sink) (ByteView
 	return dest.view()
 }
 
-func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (ByteView, error) {
+func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string, bypassCache bool) (ByteView, error) {
 	req := &pb.GetRequest{
 		Group: &g.name,
 		Key:   &key,
 	}
 	res := &pb.GetResponse{}
-	err := peer.Get(ctx, req, res)
+	err := peer.Get(ctx, req, res, bypassCache)
 	if err != nil {
 		return ByteView{}, err
 	}
