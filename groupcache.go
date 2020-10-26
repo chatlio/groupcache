@@ -387,8 +387,6 @@ func (g *Group) loadWithoutCache(ctx context.Context, key string, dest Sink) (va
 	}
 	g.Stats.LocalLoads.Add(1)
 
-	g.populateCache(key, value, &g.mainCache)
-
 	return value, nil
 }
 
