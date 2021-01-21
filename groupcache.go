@@ -32,9 +32,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	pb "github.com/chatlio/groupcache/v3/groupcachepb"
-	"github.com/chatlio/groupcache/v3/lru"
-	"github.com/chatlio/groupcache/v3/singleflight"
+	pb "github.com/chatlio/groupcache/v4/groupcachepb"
+	"github.com/chatlio/groupcache/v4/lru"
+	"github.com/chatlio/groupcache/v4/singleflight"
 )
 
 // A Getter loads data for a key.

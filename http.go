@@ -27,8 +27,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chatlio/groupcache/v3/consistenthash"
-	pb "github.com/chatlio/groupcache/v3/groupcachepb"
+	"github.com/chatlio/groupcache/v4/consistenthash"
+	pb "github.com/chatlio/groupcache/v4/groupcachepb"
 	"github.com/golang/protobuf/proto"
 )
 

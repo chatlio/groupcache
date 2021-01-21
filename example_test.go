@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/chatlio/groupcache/v3"
+	"github.com/chatlio/groupcache/v4"
 )
 
 func ExampleUsage() {

@@ -21,7 +21,7 @@ package groupcache
 import (
 	"context"
 
-	pb "github.com/chatlio/groupcache/v3/groupcachepb"
+	pb "github.com/chatlio/groupcache/v4/groupcachepb"
 )
 
 // ProtoGetter is the interface that must be implemented by a peer.
